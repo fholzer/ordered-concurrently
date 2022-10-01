@@ -11,25 +11,34 @@ import (
 
 type zeroLoadWorker int
 
-func (w zeroLoadWorker) Run(ctx context.Context) interface{} {
-	return w * 2
+func zeroLoadWorkerRun(w interface{}) interface{} {
+	return w.(zeroLoadWorker) * 2
 }
 
 type loadWorker int
 
-func (w loadWorker) Run(ctx context.Context) interface{} {
+func loadWorkerRun(w interface{}) interface{} {
 	time.Sleep(time.Millisecond * time.Duration(rand.Intn(100)))
-	return w * 2
+	return w.(loadWorker) * 2
+}
+
+func processGeneratorGenerator(wf ProcessFunc) processFuncGenerator {
+	return func(int) (ProcessFunc, error) {
+		return wf, nil
+	}
 }
 
 func Test1(t *testing.T) {
 	t.Run("Test with Preset Pool Size", func(t *testing.T) {
 		ctx := context.Background()
 		max := 10
-		inputChan := make(chan WorkFunction)
+		inputChan := make(chan interface{})
 		wg := &sync.WaitGroup{}
 
-		outChan := Process(ctx, inputChan, &Options{PoolSize: 10})
+		outChan, err := Process(ctx, inputChan, processGeneratorGenerator(loadWorkerRun), &Options{PoolSize: 10})
+		if err != nil {
+			panic(err)
+		}
 		counter := 0
 		go func(t *testing.T) {
 			for out := range outChan {
@@ -61,10 +70,13 @@ func Test2(t *testing.T) {
 		ctx := context.Background()
 
 		max := 10
-		inputChan := make(chan WorkFunction)
+		inputChan := make(chan interface{})
 		wg := &sync.WaitGroup{}
 
-		outChan := Process(ctx, inputChan, &Options{OutChannelBuffer: 2})
+		outChan, err := Process(ctx, inputChan, processGeneratorGenerator(loadWorkerRun), &Options{OutChannelBuffer: 2})
+		if err != nil {
+			panic(err)
+		}
 		counter := 0
 		go func(t *testing.T) {
 			for out := range outChan {
@@ -96,10 +108,13 @@ func Test3(t *testing.T) {
 		ctx := context.Background()
 
 		max := 10
-		inputChan := make(chan WorkFunction)
+		inputChan := make(chan interface{})
 		wg := &sync.WaitGroup{}
 
-		outChan := Process(ctx, inputChan, &Options{OutChannelBuffer: 2})
+		outChan, err := Process(ctx, inputChan, processGeneratorGenerator(zeroLoadWorkerRun), &Options{OutChannelBuffer: 2})
+		if err != nil {
+			panic(err)
+		}
 		counter := 0
 		go func(t *testing.T) {
 			for out := range outChan {
@@ -132,8 +147,11 @@ func Test4(t *testing.T) {
 		ctx := context.Background()
 
 		max := 10
-		inputChan := make(chan WorkFunction)
-		output := Process(ctx, inputChan, &Options{PoolSize: 10, OutChannelBuffer: 10})
+		inputChan := make(chan interface{})
+		output, err := Process(ctx, inputChan, processGeneratorGenerator(zeroLoadWorkerRun), &Options{PoolSize: 10, OutChannelBuffer: 10})
+		if err != nil {
+			panic(err)
+		}
 		go func() {
 			for work := 0; work < max; work++ {
 				inputChan <- zeroLoadWorker(work)
@@ -160,8 +178,11 @@ func TestSortedData(t *testing.T) {
 		ctx := context.Background()
 
 		max := 10
-		inputChan := make(chan WorkFunction)
-		output := Process(ctx, inputChan, &Options{PoolSize: 10, OutChannelBuffer: 10})
+		inputChan := make(chan interface{})
+		output, err := Process(ctx, inputChan, processGeneratorGenerator(loadWorkerRun), &Options{PoolSize: 10, OutChannelBuffer: 10})
+		if err != nil {
+			panic(err)
+		}
 		go func() {
 			for work := 0; work < max; work++ {
 				inputChan <- loadWorker(work)
@@ -188,8 +209,11 @@ func TestSortedDataMultiple(t *testing.T) {
 			ctx := context.Background()
 
 			max := 10
-			inputChan := make(chan WorkFunction)
-			output := Process(ctx, inputChan, &Options{PoolSize: 10, OutChannelBuffer: 10})
+			inputChan := make(chan interface{})
+			output, err := Process(ctx, inputChan, processGeneratorGenerator(loadWorkerRun), &Options{PoolSize: 10, OutChannelBuffer: 10})
+			if err != nil {
+				panic(err)
+			}
 			go func() {
 				for work := 0; work < max; work++ {
 					inputChan <- loadWorker(work)
@@ -214,8 +238,11 @@ func TestSortedDataMultiple(t *testing.T) {
 func TestStreamingInput(t *testing.T) {
 	t.Run("Test streaming input", func(t *testing.T) {
 		ctx := context.Background()
-		inputChan := make(chan WorkFunction, 10)
-		output := Process(ctx, inputChan, &Options{PoolSize: 10, OutChannelBuffer: 10})
+		inputChan := make(chan interface{}, 10)
+		output, err := Process(ctx, inputChan, processGeneratorGenerator(zeroLoadWorkerRun), &Options{PoolSize: 10, OutChannelBuffer: 10})
+		if err != nil {
+			panic(err)
+		}
 
 		ticker := time.NewTicker(100 * time.Millisecond)
 		done := make(chan bool)
@@ -261,8 +288,11 @@ func TestStreamingInput(t *testing.T) {
 
 func BenchmarkOC(b *testing.B) {
 	max := 100000
-	inputChan := make(chan WorkFunction)
-	output := Process(context.Background(), inputChan, &Options{PoolSize: 10, OutChannelBuffer: 10})
+	inputChan := make(chan interface{})
+	output, err := Process(context.Background(), inputChan, processGeneratorGenerator(zeroLoadWorkerRun), &Options{PoolSize: 10, OutChannelBuffer: 10})
+	if err != nil {
+		panic(err)
+	}
 	go func() {
 		for work := 0; work < max; work++ {
 			inputChan <- zeroLoadWorker(work)
@@ -276,8 +306,11 @@ func BenchmarkOC(b *testing.B) {
 
 func BenchmarkOCLoad(b *testing.B) {
 	max := 10
-	inputChan := make(chan WorkFunction)
-	output := Process(context.Background(), inputChan, &Options{PoolSize: 10, OutChannelBuffer: 10})
+	inputChan := make(chan interface{})
+	output, err := Process(context.Background(), inputChan, processGeneratorGenerator(loadWorkerRun), &Options{PoolSize: 10, OutChannelBuffer: 10})
+	if err != nil {
+		panic(err)
+	}
 	go func() {
 		for work := 0; work < max; work++ {
 			inputChan <- loadWorker(work)
@@ -292,8 +325,11 @@ func BenchmarkOCLoad(b *testing.B) {
 func BenchmarkOC2(b *testing.B) {
 	for i := 0; i < 100; i++ {
 		max := 1000
-		inputChan := make(chan WorkFunction)
-		output := Process(context.Background(), inputChan, &Options{PoolSize: 10, OutChannelBuffer: 10})
+		inputChan := make(chan interface{})
+		output, err := Process(context.Background(), inputChan, processGeneratorGenerator(zeroLoadWorkerRun), &Options{PoolSize: 10, OutChannelBuffer: 10})
+		if err != nil {
+			panic(err)
+		}
 		go func() {
 			for work := 0; work < max; work++ {
 				inputChan <- zeroLoadWorker(work)

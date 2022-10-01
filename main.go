@@ -19,22 +19,32 @@ type OrderedOutput struct {
 }
 
 // WorkFunction interface
-type WorkFunction interface {
-	Run(ctx context.Context) interface{}
-}
+// type WorkFunction func(ctx context.Context) interface{}
+type ProcessFunc func(interface{}) interface{}
+type processFuncGenerator func(int) (ProcessFunc, error)
 
 // Process processes work function based on input.
 // It Accepts an WorkFunction read channel, work function and concurrent go routine pool size.
 // It Returns an interface{} channel.
-func Process(ctx context.Context, inputChan <-chan WorkFunction, options *Options) <-chan OrderedOutput {
+func Process(ctx context.Context, inputChan <-chan interface{}, processFuncGenerator processFuncGenerator, options *Options) (<-chan OrderedOutput, error) {
 
 	outputChan := make(chan OrderedOutput, options.OutChannelBuffer)
 
-	go func() {
-		if options.PoolSize < 1 {
-			// Set a minimum number of processors
-			options.PoolSize = 1
+	if options.PoolSize < 1 {
+		// Set a minimum number of processors
+		options.PoolSize = 1
+	}
+
+	processors := make([]ProcessFunc, options.PoolSize)
+	for i := 0; i < options.PoolSize; i++ {
+		var err error
+		processors[i], err = processFuncGenerator(i)
+		if err != nil {
+			return nil, err
 		}
+	}
+
+	go func() {
 		processChan := make(chan *processInput, options.PoolSize)
 		aggregatorChan := make(chan *processInput, options.PoolSize)
 
@@ -65,16 +75,13 @@ func Process(ctx context.Context, inputChan <-chan WorkFunction, options *Option
 		poolWg.Add(options.PoolSize)
 		// Create a goroutine pool
 		for i := 0; i < options.PoolSize; i++ {
-			go func(worker int) {
-				defer func() {
-					poolWg.Done()
-				}()
+			go func(process ProcessFunc) {
+				defer poolWg.Done()
 				for input := range processChan {
-					input.value = input.workFn.Run(ctx)
-					input.workFn = nil
+					input.value = process(input.input)
 					aggregatorChan <- input
 				}
-			}(i)
+			}(processors[i])
 		}
 
 		go func() {
@@ -88,10 +95,10 @@ func Process(ctx context.Context, inputChan <-chan WorkFunction, options *Option
 			}()
 			var order uint64
 			for input := range inputChan {
-				processChan <- &processInput{workFn: input, order: order}
+				processChan <- &processInput{input: input, order: order}
 				order++
 			}
 		}()
 	}()
-	return outputChan
+	return outputChan, nil
 }

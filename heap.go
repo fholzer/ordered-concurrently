@@ -1,9 +1,9 @@
 package orderedconcurrently
 
 type processInput struct {
-	workFn WorkFunction
-	order  uint64
-	value  interface{}
+	input interface{}
+	order uint64
+	value interface{}
 }
 
 type processInputHeap []*processInput
